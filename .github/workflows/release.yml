@@ -12,6 +12,11 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      MAVEN_CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+      MAVEN_CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+      SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+      SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -33,3 +38,19 @@ jobs:
         env:
           GITHUB_ACTOR: ${{ github.actor }}
           GITHUB_TOKEN: ${{ github.token }}
+      - name: Import signing key
+        if: env.SIGNING_KEY != ''
+        run: printf '%s' "$SIGNING_KEY" | gpg --batch --import
+      # Maven Central (plugin jar + plugin marker) via the Central Portal OSSRH staging API, then the
+      # manual-upload POST that publishes it. The Gradle Plugin Portal needs an API key we do not have.
+      - name: Maven Central
+        if: env.MAVEN_CENTRAL_USERNAME != '' && env.SIGNING_KEY != ''
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          if curl -fsI "https://repo1.maven.org/maven2/io/github/watchtowerobservability/watchtower-gradle-plugin/$V/" >/dev/null; then
+            echo "watchtower-gradle-plugin $V is already on Maven Central"; exit 0
+          fi
+          gradle publishAllPublicationsToMavenCentralRepository
+          AUTH=$(printf '%s:%s' "$MAVEN_CENTRAL_USERNAME" "$MAVEN_CENTRAL_PASSWORD" | base64 | tr -d '\n')
+          curl -fS -X POST -H "Authorization: Bearer $AUTH" \
+            "https://ossrh-staging-api.central.sonatype.com/manual/upload/defaultRepository/io.github.watchtowerobservability?publishing_type=automatic"
