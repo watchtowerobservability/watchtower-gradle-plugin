@@ -33,16 +33,17 @@ jobs:
       - name: GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" build/libs/*.jar --generate-notes --verify-tag
-      - run: gradle publish
-        env:
-          GITHUB_ACTOR: ${{ github.actor }}
-          GITHUB_TOKEN: ${{ github.token }}
+        run: gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || gh release create "$GITHUB_REF_NAME" build/libs/*.jar --generate-notes --verify-tag
       - name: Import signing key
         if: env.SIGNING_KEY != ''
         run: printf '%s' "$SIGNING_KEY" | gpg --batch --import
       # Maven Central (plugin jar + plugin marker) via the Central Portal OSSRH staging API, then the
       # manual-upload POST that publishes it. The Gradle Plugin Portal needs an API key we do not have.
+      - run: gradle publish
+        continue-on-error: true # a re-run of a tag hits 409 here; Maven Central is the real target
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ github.token }}
       - name: Maven Central
         if: env.MAVEN_CENTRAL_USERNAME != '' && env.SIGNING_KEY != ''
         run: |
